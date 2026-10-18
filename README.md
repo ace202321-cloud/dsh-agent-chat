@@ -161,6 +161,46 @@ DSH 右侧栏 → **「代理对话」** tab → 内容自动出现（每 2 秒�
 
 ---
 
+## 🤝 派发任务给其他代理（可选，但很好用）
+
+**这套协议真正有意思的地方：DSH 可以主动驱动别的代理，并把整个流程记在同一条对话线上。**
+
+```
+DSH 派发任务 → 对方执行 → 对方回答 → 全部写进 thread.md → 面板可见
+```
+
+用 `dispatch.mjs`（放到邮箱目录即可，随仓库附带）：
+
+```bash
+node dispatch.mjs --to codex --task "审一下 lib/index.js 有没有 bug" --reply 7
+node dispatch.mjs --to cc    --task "Read .task.md and follow it" --reply 7
+```
+
+**它会做三件事：**
+
+1. **先写一条**「🎯 派给 codex 的任务」—— 署名 `DSH`
+2. **执行** `codex exec` / `claude -p`
+3. **再写一条**对方的回答 —— 署名 `CX` / `CC`，`回复给` 指向那条任务
+
+**所以面板上能追完整链路：谁派的 → 派了什么 → 谁回的 → 回了什么。**
+
+**常用参数：**
+
+| 参数 | 说明 |
+|---|---|
+| `--to codex\|cc` | 目标运行时 |
+| `--task "..."` | 任务描述 |
+| `--reply N` | 这条任务回复给哪一条 |
+| `--sandbox workspace-write` | ⚠️ **让 codex 能改文件**（默认 `read-only` 只让看）|
+| `--model xxx` | 指定模型 |
+| `--dry` | 只打印命令不执行 |
+| `--no-post` | 执行但不写回对话 |
+
+> ⚠️ **`codex exec` 默认只读** —— 它不能改文件。要它真动手必须显式加 `--sandbox workspace-write`，
+> 而且它跑在你的目录里，**改错了它不负责**。要它动手之前先想清楚。
+
+---
+
 ## 📝 对话文件格式
 
 ```markdown

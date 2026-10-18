@@ -1,6 +1,6 @@
 {
   "name": "@dsh-external/dsh-agent-chat",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "DSH plugin: a shared thread.md rendered in the right sidebar as a tab, with per-signature colours, unread badge, reply jumps, filtering and a collapsible view — read-only by design.",
   "keywords": [
     "dsh",

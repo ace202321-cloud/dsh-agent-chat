@@ -1,14 +1,17 @@
 /**
  * @dsh-external/dsh-agent-chat — client 侧（右侧栏 tab 类型）
  *
- * 官方架构：右侧栏是 DSH 原生栏，插件"只提供 tab 类型"。
- * 所以本插件走两阶段注册（照抄官方 ui-sidebar-documentpreview 的公开路径）：
+ * 官方架构：右侧栏是 DSH 原生栏，插件「只提供 tab 类型」。
+ * 两阶段注册（照抄官方 ui-sidebar-documentpreview 的公开路径）：
  *   阶段 1  ctx.sidebarRightTabs.register({ id, kind, title, keepMounted })
  *   阶段 2  ctx.slots.register({ name: 'sidebar.right.pane.tab', key: id }, Body)
  *
- * 只读渲染 agent-mailbox/thread.md：
- *   署名分色 / 未读计数 / 回复跳转 / 按署名筛选 / 折叠 / 自动滚底 / 相对时间
- *   轻量 markdown（代码块 · 表格 · 标题 · 列表 · 加粗 · 行内代码）
+ * 2026-10-18 修订（Codex + Claude Code 双审后）：
+ *  - 未读逻辑：已读位置持久化到 localStorage，首包只做基线，请求失败不重置，折叠时不推进
+ *  - 轮询：inFlight 锁 + 序号，避免慢请求并发、旧响应覆盖新数据
+ *  - React key 加下标，避免重复 #N 时复用错节点
+ *  - 去掉依赖未注入服务的 openTab 调用（它一直是静默失败的）
+ *  - 按署名筛选时，跳转到被隐藏的目标会自动清空筛选
  */
 import * as React from 'react'
 
@@ -16,6 +19,7 @@ export const inject = ['slots', 'sidebarRightTabs']
 
 const API = '/@dsh-external/dsh-agent-chat/api'
 const POLL_MS = 2000
+const SEEN_STORE = 'dsh-agent-chat:seen'
 
 export const TAB_ID = '@dsh-external/dsh-agent-chat'
 export const TAB_KIND = 'agent-chat'
@@ -36,13 +40,34 @@ interface Payload {
   ok: boolean
   reason?: string
   file?: string
+  mailbox?: string
+  envVar?: string
   mtime?: number
+  size?: number
   count?: number
   signatures?: string[]
   messages?: Msg[]
 }
 
 const h = React.createElement
+
+/** 已读位置：按 mailbox 区分存储 */
+function loadSeen(mailbox: string | undefined): number {
+  if (!mailbox) return -1
+  try {
+    const raw = localStorage.getItem(SEEN_STORE)
+    if (!raw) return -1
+    const j = JSON.parse(raw)
+    return j && j.mailbox === mailbox && typeof j.n === 'number' ? j.n : -1
+  } catch {
+    return -1
+  }
+}
+
+function saveSeen(mailbox: string | undefined, n: number): void {
+  if (!mailbox) return
+  try { localStorage.setItem(SEEN_STORE, JSON.stringify({ mailbox, n })) } catch { /* ignore */ }
+}
 
 function esc(s: any): string {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function (c: string) {
@@ -82,6 +107,15 @@ function md(text: string): string {
       const buf: string[] = []
       i++
       while (i < lines.length && !/^\s*```/.test(lines[i])) { buf.push(lines[i]); i++ }
+      i++
+      out.push('<pre style="background:#f6f8fa;border:1px solid #e1e4e8;border-radius:6px;padding:8px;overflow:auto;font-size:12px;margin:6px 0"><code>' + esc(buf.join('\n')) + '</code></pre>')
+      continue
+    }
+    // ~~~ 围栏（GFM 也支持），里面的内容不能被当成标题/表格
+    if (/^\s*~~~/.test(line)) {
+      const buf: string[] = []
+      i++
+      while (i < lines.length && !/^\s*~~~/.test(lines[i])) { buf.push(lines[i]); i++ }
       i++
       out.push('<pre style="background:#f6f8fa;border:1px solid #e1e4e8;border-radius:6px;padding:8px;overflow:auto;font-size:12px;margin:6px 0"><code>' + esc(buf.join('\n')) + '</code></pre>')
       continue
@@ -138,22 +172,45 @@ function AgentChatBody(_props: any): any {
   const [collapsed, setCollapsed] = React.useState(false)
   const [filterSig, setFilterSig] = React.useState('')
   const [now, setNow] = React.useState(Date.now())
-  const lastCountRef = React.useRef(0)
+  const [seenUpTo, setSeenUpTo] = React.useState(-1)
   const listRef = React.useRef<any>(null)
   const nearBottomRef = React.useRef(true)
+  const inFlightRef = React.useRef(false)
+  const seqRef = React.useRef(0)
+  const mailboxRef = React.useRef<string | undefined>(undefined)
 
+  // 轮询：inFlight 锁 + 序号，避免慢请求并发与旧响应覆盖
   React.useEffect(function () {
     let alive = true
     let timer: any = null
+
     const tick = async (): Promise<void> => {
+      if (inFlightRef.current) return
+      inFlightRef.current = true
+      const my = ++seqRef.current
+      // ⚠️ 必须有超时：请求永不 settle 会让 inFlight 永久为 true，轮询彻底停摆
+      const ac = new AbortController()
+      const killTimer = setTimeout(function () { try { ac.abort() } catch { /* ignore */ } }, 6000)
       try {
-        const r = await fetch(API, { cache: 'no-store' })
-        const j = r.ok ? await r.json() : { ok: false, reason: 'HTTP ' + r.status, messages: [], signatures: [] }
-        if (alive) { setData(j); setNow(Date.now()) }
+        const r = await fetch(API, { cache: 'no-store', signal: ac.signal })
+        const j = r.ok
+          ? await r.json()
+          : { ok: false, reason: 'HTTP ' + r.status, messages: [], signatures: [] }
+        if (!alive || my !== seqRef.current) return
+        setData(j)
+        setNow(Date.now())
       } catch (e: any) {
-        if (alive) setData({ ok: false, reason: String((e && e.message) || e), messages: [], signatures: [] })
+        if (!alive || my !== seqRef.current) return
+        // 失败：只标记错误，不动已读基线
+        setData(function (prev: any) {
+          return { ok: false, reason: String((e && e.message) || e), file: prev && prev.file, mailbox: prev && prev.mailbox, messages: prev && prev.messages, signatures: prev && prev.signatures }
+        })
+      } finally {
+        clearTimeout(killTimer)
+        if (my === seqRef.current) inFlightRef.current = false
       }
     }
+
     void tick()
     timer = setInterval(function () { void tick() }, POLL_MS)
     return function () { alive = false; if (timer) clearInterval(timer) }
@@ -165,19 +222,54 @@ function AgentChatBody(_props: any): any {
 
   let maxN = 0
   for (const m of msgs) if ((m.n || 0) > maxN) maxN = m.n || 0
-  let unread = 0
-  for (const m of msgs) if ((m.n || 0) > lastCountRef.current) unread++
 
+  // 已读推进：
+  //   首次（seenUpTo < 0）只做基线，不报未读
+  //   请求失败不推进
+  //   折叠时不推进
+  //   只有贴底（没在翻历史）才推进
   React.useEffect(function () {
-    const el = listRef.current
-    if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight
-    lastCountRef.current = maxN
+    const mailbox = data && data.mailbox
+    if (mailbox) mailboxRef.current = mailbox
+    if (!data || !data.ok || seenUpTo < 0) return
+    if (collapsed) return
+    if (!nearBottomRef.current) return
+    // 页签不可见时（keepMounted 下仍会轮询）不推进已读，否则新消息会被静默吞掉
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+    if (maxN > seenUpTo) { saveSeen(mailboxRef.current, maxN); setSeenUpTo(maxN) }
   })
+
+  // 首包 / 换邮箱：载入已读基线
+  React.useEffect(function () {
+    if (!data || !data.ok || !data.mailbox) return
+    if (seenUpTo === -1) {
+      const seen = loadSeen(data.mailbox)
+      const baseline = seen >= 0 ? seen : maxN          // 没有记录就从当前最大值起算
+      setSeenUpTo(baseline)
+    }
+  }, [data, maxN, seenUpTo])
+
+  let unread = 0
+  for (const m of msgs) if ((m.n || 0) > seenUpTo) unread++
 
   const onScroll = function (): void {
     const el = listRef.current
     if (!el) return
     nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+  }
+
+  const jumpTo = function (targetN: number): void {
+    let el = document.getElementById('agent-chat-msg-' + targetN)
+    if (!el && filterSig) {
+      // 目标被筛选隐藏了：先清空筛选，等下一帧再跳
+      setFilterSig('')
+      setTimeout(function () {
+        const again = document.getElementById('agent-chat-msg-' + targetN)
+        if (again && (again as any).scrollIntoView) (again as any).scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 60)
+      return
+    }
+    if (el && (el as any).scrollIntoView) (el as any).scrollIntoView({ behavior: 'smooth', block: 'center' })
   }
 
   const header = h('div', {
@@ -217,11 +309,12 @@ function AgentChatBody(_props: any): any {
   } else if (!shown.length) {
     listChildren = h('div', { style: { padding: '12px', color: '#888', fontSize: '12px' } }, '暂无消息')
   } else {
-    listChildren = shown.map(function (m) {
+    listChildren = shown.map(function (m, idx) {
       const c = colorOf(m.sig, sigs)
-      const isNew = (m.n || 0) > lastCountRef.current
+      const isNew = (m.n || 0) > seenUpTo
       return h('div', {
-        key: m.n,
+        // 重复 #N 时 key 必须唯一，否则 React 会复用错节点
+        key: String(m.n) + ':' + idx,
         id: 'agent-chat-msg-' + m.n,
         style: {
           borderLeft: '3px solid ' + c,
@@ -241,10 +334,7 @@ function AgentChatBody(_props: any): any {
           h('span', { style: { fontWeight: 700, color: '#333' } }, '#' + m.n + ' ' + m.sig),
           h('span', { title: m.time }, relTime(m.time, now)),
           m.replyTo != null ? h('a', {
-            onClick: function () {
-              const target = document.getElementById('agent-chat-msg-' + m.replyTo)
-              if (target && (target as any).scrollIntoView) (target as any).scrollIntoView({ behavior: 'smooth', block: 'center' })
-            },
+            onClick: function () { jumpTo(Number(m.replyTo)) },
             style: { color: c, textDecoration: 'underline', cursor: 'pointer' },
           }, '\u21a9 #' + m.replyTo) : null,
           m.model ? h('span', { style: { color: '#aaa' } }, '(' + String(m.model).slice(0, 28) + ')') : null,
@@ -291,14 +381,4 @@ export function apply(ctx: any): void {
       return ctx.slots.register({ name: 'sidebar.right.pane.tab', key: TAB_ID }, AgentChatBody)
     })
   }, 'dsh-agent-chat: tab body')
-
-  // 首次进入时把它开出来（用户不用去找）
-  ctx.effect(function () {
-    try {
-      ctx.sidebarRight.openTab(TAB_KIND)
-    } catch (e) {
-      // 侧栏还没就绪就等下次；不因为开不出面板而崩掉插件
-    }
-    return function () {}
-  }, 'dsh-agent-chat: open')
 }
