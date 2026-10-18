@@ -252,6 +252,29 @@ function AgentChatBody(_props: any): any {
   let unread = 0
   for (const m of msgs) if ((m.n || 0) > seenUpTo) unread++
 
+  // ⚠️ 贴底跟随（这是之前重写时弄丢的一段）：
+  //   只有「用户原本就在底部」时才自动滚到最新，
+  //   在翻历史时不打断。用 useLayoutEffect 是为了在绘制前完成，避免闪一下。
+  React.useLayoutEffect(function () {
+    const el = listRef.current
+    if (!el) return
+    if (collapsed) return
+    if (!nearBottomRef.current) return
+    el.scrollTop = el.scrollHeight
+  }, [maxN, filterSig, collapsed])
+
+  // 页签重新可见时（keepMounted 下可能一直挂着）再贴一次底
+  React.useEffect(function () {
+    if (typeof document === 'undefined') return
+    const onVis = function (): void {
+      if (document.visibilityState !== 'visible') return
+      const el = listRef.current
+      if (el && nearBottomRef.current) el.scrollTop = el.scrollHeight
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return function () { document.removeEventListener('visibilitychange', onVis) }
+  }, [])
+
   const onScroll = function (): void {
     const el = listRef.current
     if (!el) return
