@@ -1,0 +1,67 @@
+{
+  "name": "@dsh-external/dsh-agent-chat",
+  "version": "0.2.0",
+  "description": "Multi-agent chat panel for DSH — renders a shared thread.md in the right-sidebar as a tab, with per-signature colours, unread badge, reply jumps, filtering and collapsible view. Read-only by design.",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "agent",
+    "multi-agent",
+    "chat",
+    "sidebar",
+    "thread"
+  ],
+  "private": false,
+  "type": "module",
+  "main": "./lib/index.js",
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "lib/client.js.map",
+    "cordis.patch.yml",
+    "README.md",
+    "README_EN.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ace202321-cloud/dsh-agent-chat"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:client": "tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^18.2.0",
+    "typescript": "^5.9.0",
+    "tsdown": "^0.22.14"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "react",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ],
+      "platform": "web"
+    }
+  }
+}

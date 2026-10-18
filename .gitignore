@@ -1,0 +1,5 @@
+node_modules/
+*.tsbuildinfo
+*.tgz
+.DS_Store
+# lib/ 是发布物：它是预构建产物，不带源码构建步骤，必须提交
