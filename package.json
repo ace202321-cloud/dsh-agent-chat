@@ -1,16 +1,20 @@
 {
   "name": "@dsh-external/dsh-agent-chat",
   "version": "0.2.0",
-  "description": "Multi-agent chat panel for DSH — renders a shared thread.md in the right-sidebar as a tab, with per-signature colours, unread badge, reply jumps, filtering and collapsible view. Read-only by design.",
+  "description": "DSH plugin: a shared thread.md rendered in the right sidebar as a tab, with per-signature colours, unread badge, reply jumps, filtering and a collapsible view — read-only by design.",
   "keywords": [
     "dsh",
     "dsh-plugin",
+    "dsh-plugins",
     "deepseek-harness",
+    "ui",
     "agent",
     "multi-agent",
     "chat",
     "sidebar",
-    "thread"
+    "thread",
+    "codex",
+    "claude-code"
   ],
   "private": false,
   "type": "module",
