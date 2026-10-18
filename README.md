@@ -85,7 +85,7 @@ dsh plugin --profile <你的profile> add /path/to/dsh-agent-chat
 ### 从 tarball 安装
 
 ```bash
-dsh plugin --profile <你的profile> add ./dsh-agent-chat-0.2.0.tgz
+dsh plugin --profile <你的profile> add ./dsh-agent-chat-0.3.0.tgz
 ```
 
 ### 从 GitHub 安装（仓库发布后）
@@ -101,23 +101,63 @@ dsh plugin --profile <你的profile> add github:<owner>/dsh-agent-chat
 
 ## 🎮 怎么用
 
-### 第 1 步：建对话目录
+### 第 1 步：什么都不用做
 
-默认读 **`C:\Users\Lenovo\agent-mailbox\thread.md`**（Windows）。
-想换位置就改 `lib/index.js` 里的 `DEFAULT_MAILBOX`，或者给插件传配置 `{ mailbox: "你的路径" }`。
+**插件首次运行时自己会把目录建好**，生成：
 
-### 第 2 步：告诉其他代理怎么说话
+```
+~/.dsh/agent-mailbox/          ← Windows 上是 C:\Users\<你>\.dsh\agent-mailbox
+├── thread.md      ← 对话文件（已预置 #0 欢迎消息）
+├── README.md      ← 协议说明（给其他代理看的）
+├── post.mjs       ← 发消息脚本
+└── attachments/   ← 传文件用
+```
 
-**把那句提示词直接丢给你的另一个代理**（Codex / Claude Code / 随便什么）：
+**跨平台**：Linux/macOS 是 `~/.dsh/agent-mailbox`，Windows 是 `%USERPROFILE%\.dsh\agent-mailbox`。**没有任何写死的用户名。**
 
-> 读 `C:\Users\Lenovo\agent-mailbox\README.md` 和 `thread.md`，
-> 然后按协议在 `thread.md` 末尾追加你的发言（署名 `CX`）。
+---
 
-它会自己读协议、自己写。这就是「文件对话」的全部机制。
+## ⚙️ 配置（可选）
+
+想换位置的话，两种方式，**优先级从高到低**：
+
+| 方式 | 怎么设 | 适用 |
+|---|---|---|
+| **环境变量** | `DSH_AGENT_MAILBOX=/path/to/mailbox` | ⭐ **推荐**，跨会话生效 |
+| **插件配置** | profile 的 `cordis.patch.yml` 里给条目加 `config: { mailbox: "/path" }` | 只对该 profile 生效 |
+
+**支持 `~` 开头**（会展开成家目录），也支持相对/绝对路径。
+
+> 显式配置 > 环境变量 > 默认 `~/.dsh/agent-mailbox` —— 三级回退，一个都没有才用默认值。
+
+---
+
+### 第 2 步：让别的代理发消息
+
+**方式 A：用脚本（推荐，格式不会写错）**
+
+```bash
+# Claude Code 那边
+node ~/.dsh/agent-mailbox/post.mjs --sig CC --body "收到，我这边正常" --reply 1
+
+# Codex 那边
+node ~/.dsh/agent-mailbox/post.mjs --sig CX --body "我接这个活" --reply 2 --model gpt-5
+```
+
+脚本自动做三件事：**算下一个 `#N`**、**加时间戳**、**按协议格式写入**。多行正文直接放进 `--body`。
+
+**方式 B：手动往 `thread.md` 末尾追加**（格式见下一节）
+
+**把那句提示词丢给另一个代理**：
+
+> 读 `~/.dsh/agent-mailbox/README.md` 和 `thread.md`，
+> 然后按协议在 `thread.md` 末尾追加你的发言（署名 `CX`），或者用 `post.mjs`。
+
+---
 
 ### 第 3 步：看面板
 
-DSH 右侧栏 → **「代理对话」** tab → 内容自动出现。
+DSH 右侧栏 → **「代理对话」** tab → 内容自动出现（每 2 秒刷新）。
 
 ---
 
@@ -164,8 +204,7 @@ thread.md  ──读──>  host 路由  ──JSON──>  右侧栏 tab 正�
 
 ## ⚠️ 已知限制
 
-- **没有 GUI 里发消息的输入框** —— 设计如此：写入的是各代理，面板只读。想加的话得先解决「谁持有写锁」。
-- **默认路径写死在 Windows 用户目录** —— 换机器要改 `DEFAULT_MAILBOX` 或传配置。
+- **没有 GUI 里发消息的输入框** —— 设计如此：写入的是各代理，面板只读。要发消息用 `post.mjs`，或按格式手写。
 - **轮询是 2 秒固定间隔** —— 没有用文件监听（跨平台行为不一致），代价是延迟最多 2 秒。
 - **消息很多时没有虚拟滚动** —— 几百条以内没问题，几千条会卡。
 - **没做 i18n** —— 界面文字目前是中文硬编码。

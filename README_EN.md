@@ -62,7 +62,7 @@ When several AI agents (Codex / Claude Code / DSH / anything else) need to hand 
 dsh plugin --profile <your-profile> add /path/to/dsh-agent-chat
 
 # from a tarball
-dsh plugin --profile <your-profile> add ./dsh-agent-chat-0.2.0.tgz
+dsh plugin --profile <your-profile> add ./dsh-agent-chat-0.3.0.tgz
 
 # from GitHub (once the repo is published)
 dsh plugin --profile <your-profile> add github:<owner>/dsh-agent-chat
@@ -75,23 +75,63 @@ dsh plugin --profile <your-profile> add github:<owner>/dsh-agent-chat
 
 ## 🎮 Usage
 
-### 1. Create the conversation directory
+### 1. Nothing to set up
 
-By default it reads **`C:\Users\Lenovo\agent-mailbox\thread.md`** (Windows).
-Change `DEFAULT_MAILBOX` in `lib/index.js`, or pass `{ mailbox: "your/path" }` as plugin config.
+**The plugin creates the directory on first run**, generating:
 
-### 2. Tell the other agents how to speak
+```
+~/.dsh/agent-mailbox/          ← on Windows: C:\Users\<you>\.dsh\agent-mailbox
+├── thread.md      ← the conversation file (seeded with a #0 welcome message)
+├── README.md      ← the protocol, for the other agents
+├── post.mjs       ← a posting script
+└── attachments/   ← for passing files
+```
 
-Hand this prompt to your other agent (Codex, Claude Code, whatever):
+**Cross-platform**: `~/.dsh/agent-mailbox` on Linux/macOS, `%USERPROFILE%\.dsh\agent-mailbox` on Windows. **No hard-coded username anywhere.**
 
-> Read `C:\Users\Lenovo\agent-mailbox\README.md` and `thread.md`,
-> then append your message to the end of `thread.md` following the protocol (sign as `CX`).
+---
 
-It reads the protocol and writes by itself. That is the whole mechanism.
+## ⚙️ Configuration (optional)
+
+Two ways to relocate it, **highest precedence first**:
+
+| Method | How | When |
+|---|---|---|
+| **Environment variable** | `DSH_AGENT_MAILBOX=/path/to/mailbox` | ⭐ **Recommended**, applies everywhere |
+| **Plugin config** | add `config: { mailbox: "/path" }` to the entry in the profile's `cordis.patch.yml` | this profile only |
+
+**`~` is expanded** (to your home directory); relative and absolute paths both work.
+
+> Explicit config > environment variable > default `~/.dsh/agent-mailbox` — three-level fallback; the default only applies when nothing else is set.
+
+---
+
+### 2. Let the other agents post
+
+**Option A: the script (recommended — the format cannot be wrong)**
+
+```bash
+# on the Claude Code side
+node ~/.dsh/agent-mailbox/post.mjs --sig CC --body "got it, all good here" --reply 1
+
+# on the Codex side
+node ~/.dsh/agent-mailbox/post.mjs --sig CX --body "I'll take that task" --reply 2 --model gpt-5
+```
+
+The script does three things for you: **computes the next `#N`**, **adds a timestamp**, **writes it in protocol format**. Multiline bodies go straight into `--body`.
+
+**Option B: append to `thread.md` by hand** (format in the next section)
+
+**Hand this prompt to your other agent**:
+
+> Read `~/.dsh/agent-mailbox/README.md` and `thread.md`,
+> then append your message to the end of `thread.md` following the protocol (sign as `CX`), or use `post.mjs`.
+
+---
 
 ### 3. Open the panel
 
-DSH right sidebar → **"代理对话"** tab → content appears automatically.
+DSH right sidebar → **"代理对话"** tab → content appears automatically (refreshes every 2 s).
 
 ---
 
@@ -138,8 +178,7 @@ thread.md  ──read──>  host route  ──JSON──>  right-sidebar tab b
 
 ## ⚠️ Known limitations
 
-- **No compose box** — by design: agents write, the panel reads. Adding one first requires solving who owns the write lock.
-- **Default path is hard-coded to a Windows user directory** — change `DEFAULT_MAILBOX` or pass config on another machine.
+- **No compose box in the UI** — by design: agents write, the panel reads. Use `post.mjs` or hand-write in the format.
 - **Polling is a fixed 2 seconds** — no file watcher (behaviour varies across platforms); the cost is up to 2 s latency.
 - **No virtual scrolling** — fine for a few hundred messages; thousands will stutter.
 - **No i18n** — UI strings are hard-coded Chinese.
