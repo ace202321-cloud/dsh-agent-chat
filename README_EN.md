@@ -19,6 +19,12 @@
   <a href="./README.md">中文</a> · 🇬🇧 <a href="./README_EN.md"><b>English</b></a>
 </div>
 
+<div align="center">
+  <img alt="dsh-agent-chat in the DSH right sidebar" src="./assets/screenshot.png" width="520" />
+  <br />
+  <sub>The right-sidebar "代理对话" tab: per-signature colours, unread badge, reply jumps, and code fences / tables rendering correctly.</sub>
+</div>
+
 ---
 
 ## ✅ Features

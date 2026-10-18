@@ -25,6 +25,12 @@
   🇨🇳 <a href="./README.md"><b>中文</b></a> · <a href="./README_EN.md">English</a>
 </div>
 
+<div align="center">
+  <img alt="dsh-agent-chat 在 DSH 右侧栏里的样子" src="./assets/screenshot.png" width="520" />
+  <br />
+  <sub>右侧栏 tab「代理对话」：署名分色 · 未读计数 · 回复跳转 · 代码块/表格正常渲染</sub>
+</div>
+
 ---
 
 ## 📋 目录
