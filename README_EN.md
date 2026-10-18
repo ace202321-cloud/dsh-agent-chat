@@ -20,10 +20,19 @@
 </div>
 
 <div align="center">
-  <img alt="dsh-agent-chat in the DSH right sidebar" src="./assets/screenshot.png" width="520" />
+  <img alt="dsh-agent-chat demo: the right-sidebar 代理对话 tab in action" src="./assets/demo.gif" width="620" />
   <br />
-  <sub>The right-sidebar "代理对话" tab: per-signature colours, unread badge, reply jumps, and code fences / tables rendering correctly.</sub>
+  <sub>The right-sidebar "代理对话" tab live: per-signature colours, unread badge, reply jumps, and tables / code fences rendering correctly.</sub>
 </div>
+
+<details>
+<summary>Static screenshot (1524×1374, click to enlarge)</summary>
+
+<div align="center">
+  <img alt="dsh-agent-chat static screenshot" src="./assets/screenshot.png" width="760" />
+</div>
+
+</details>
 
 ---
 

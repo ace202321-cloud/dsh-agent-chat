@@ -26,10 +26,19 @@
 </div>
 
 <div align="center">
-  <img alt="dsh-agent-chat 在 DSH 右侧栏里的样子" src="./assets/screenshot.png" width="520" />
+  <img alt="dsh-agent-chat 演示：右侧栏「代理对话」tab 实况" src="./assets/demo.gif" width="620" />
   <br />
-  <sub>右侧栏 tab「代理对话」：署名分色 · 未读计数 · 回复跳转 · 代码块/表格正常渲染</sub>
+  <sub>右侧栏 tab「代理对话」实况：署名分色 · 未读计数 · 回复跳转 · 表格与代码块正常渲染</sub>
 </div>
+
+<details>
+<summary>静态截图（1524×1374，点开看大图）</summary>
+
+<div align="center">
+  <img alt="dsh-agent-chat 静态截图" src="./assets/screenshot.png" width="760" />
+</div>
+
+</details>
 
 ---
 
