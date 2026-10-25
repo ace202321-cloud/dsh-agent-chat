@@ -486,7 +486,7 @@ export function openOurTab(svc: {
 }
 
 /** 会话头部的小按钮：用户关掉 tab 后，还能一键叫回来 */
-function makeHeaderEntry(ctx: any): any {
+function makeHeaderEntry(ctx: any, getBs: () => any): any {
   return function HeaderEntry(props: any): any {
     const [state, setState] = React.useState<'idle' | 'ok' | 'fail'>('idle')
     return h('button', {
@@ -496,7 +496,7 @@ function makeHeaderEntry(ctx: any): any {
       onClick: function (e: any) {
         try { e && e.stopPropagation && e.stopPropagation() } catch { /* ignore */ }
         const ok = openOurTab({
-          betterSidebar: ctx.betterSidebar,
+          betterSidebar: getBs(),
           sidebarRight: ctx.sidebarRight,
           sidebarRightTabs: ctx.sidebarRightTabs,
           sessionId: props && props.sessionId,
@@ -519,6 +519,13 @@ function makeHeaderEntry(ctx: any): any {
   }
 }
 
+/**
+ * 通过 ctx.inject 拿到的 betterSidebar 服务（可能不存在）。
+ * ⚠️ 不能直接读 ctx.betterSidebar —— cordis 会抛
+ * "cannot get property \"betterSidebar\" without inject"。
+ */
+let betterSidebarService: any = null
+
 export function apply(ctx: any): void {
   // 阶段 1：DSH 原生 tab 类型（没装 dsh-better-sidebar 时的通道）
   ctx.effect(function () {
@@ -537,25 +544,32 @@ export function apply(ctx: any): void {
     })
   }, 'dsh-agent-chat: tab body')
 
-  // 阶段 3：注册进 dsh-better-sidebar 的注册表（装了它的时候，用户看到的
-  // 「+」菜单列的是这一份；只注册原生通道会从菜单里消失 —— v0.4.1 的坑）
-  ctx.effect(function () {
-    try {
-      if (ctx.betterSidebar && typeof ctx.betterSidebar.registerTab === 'function') {
-        return ctx.betterSidebar.registerTab({
-          id: TAB_ID,
-          title: TAB_TITLE,
-          description: '多代理对话流（只读渲染 thread.md）',
-          order: 120,
-          single: true,                       // 同类型只开一个，重点时聚焦
-          component: AgentChatBody,
-        })
+  // 阶段 3：注册进 dsh-better-sidebar 的注册表
+  // 装了它的时候，用户看到的「+」菜单列的是这一份注册表，不是原生 sidebarRightTabs。
+  // 必须走 ctx.inject —— 直接读 ctx.betterSidebar 会被 cordis 拒（v0.4.2 的坑）。
+  try {
+    ctx.inject(['betterSidebar'], function (scoped: any) {
+      try {
+        const bs = scoped.betterSidebar
+        if (!bs || typeof bs.registerTab !== 'function') return
+        betterSidebarService = bs
+        scoped.effect(function () {
+          return bs.registerTab({
+            id: TAB_ID,
+            title: TAB_TITLE,
+            description: '多代理对话流（只读渲染 thread.md）',
+            order: 120,
+            single: true,                     // 同类型只开一个，重复点只聚焦
+            component: AgentChatBody,
+          })
+        }, 'dsh-agent-chat: better-sidebar tab')
+      } catch (e) {
+        try { console.warn('[dsh-agent-chat] betterSidebar 注册失败:', e) } catch { /* ignore */ }
       }
-    } catch (e) {
-      try { console.warn('[dsh-agent-chat] betterSidebar.registerTab 失败:', e) } catch { /* ignore */ }
-    }
-    return undefined
-  }, 'dsh-agent-chat: better-sidebar tab')
+    })
+  } catch (e) {
+    try { console.warn('[dsh-agent-chat] 无法注入 betterSidebar（可能没装 dsh-better-sidebar）:', e) } catch { /* ignore */ }
+  }
 
   // 阶段 4：会话头部入口 —— 关掉 tab 后还能叫回来
   ctx.effect(function () {
@@ -564,7 +578,7 @@ export function apply(ctx: any): void {
         name: 'conversation.session.header.actions',
         id: 'dsh-agent-chat-entry',
         order: 60,
-      }, makeHeaderEntry(ctx))
+      }, makeHeaderEntry(ctx, function () { return betterSidebarService }))
     })
   }, 'dsh-agent-chat: header entry')
 }
