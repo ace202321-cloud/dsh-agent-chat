@@ -37,6 +37,14 @@ interface Msg {
   assign?: string
   /** open / claimed / done（空 = 老消息，不参与待办） */
   status?: string
+  /** v0.5 借 parallel-claude-agents：这条要不要对方回执 */
+  ack?: boolean
+  /** v0.5：info / critical */
+  priority?: string
+  /** v0.5 借 devteam：think/plan/build/review/test/ship/reflect */
+  phase?: string
+  /** v0.5 借 ownership board：声明这次动哪些文件 */
+  scope?: string
   text: string
 }
 
@@ -54,6 +62,10 @@ interface Payload {
   pendingCount?: number
   /** 按指派对象分组计数 */
   assignedTo?: Record<string, number>
+  /** v0.5：需回执但超时未应答的 #N */
+  ackOverdue?: number[]
+  ackOverdueCount?: number
+  byPhase?: Record<string, number>
   messages?: Msg[]
 }
 
@@ -63,6 +75,24 @@ const STATUS_META: Record<string, { color: string; label: string }> = {
   claimed: { color: '#e8912d', label: '进行中' },
   done: { color: '#22a06b', label: '已完成' },
 }
+
+/** 阶段呈现（借 brianyu18/devteam 的 7 阶段） */
+const PHASE_META: Record<string, { label: string; color: string }> = {
+  think: { label: '想', color: '#8e5bd0' },
+  plan: { label: '计划', color: '#4e8cff' },
+  build: { label: '实现', color: '#22a06b' },
+  review: { label: '评审', color: '#e8912d' },
+  test: { label: '测试', color: '#0aa3a3' },
+  ship: { label: '发布', color: '#c05050' },
+  reflect: { label: '复盘', color: '#5a6b7b' },
+}
+
+/**
+ * 渲染窗口：只渲染最近这么多条，更早的用「加载更早」翻。
+ * ⚠️ 这是长对话不卡的关键 —— 上千条消息全部变 DOM 节点会拖死面板。
+ * 解析层没问题（O(n) 行扫），卡的是渲染层。
+ */
+const WINDOW_SIZE = 200
 
 const h = React.createElement
 
@@ -187,6 +217,7 @@ function AgentChatBody(_props: any): any {
   const [collapsed, setCollapsed] = React.useState(false)
   const [filterSig, setFilterSig] = React.useState('')
   const [onlyPending, setOnlyPending] = React.useState(false)
+  const [windowSize, setWindowSize] = React.useState(WINDOW_SIZE)
   const [now, setNow] = React.useState(Date.now())
   const [seenUpTo, setSeenUpTo] = React.useState(-1)
   const listRef = React.useRef<any>(null)
@@ -234,12 +265,17 @@ function AgentChatBody(_props: any): any {
 
   const msgs: Msg[] = Array.isArray(data.messages) ? data.messages : []
   const sigs: string[] = Array.isArray(data.signatures) ? data.signatures : []
-  const shown = msgs.filter(function (m) {
+  const filtered = msgs.filter(function (m) {
     if (filterSig && m.sig !== filterSig) return false
     // 只看未完成：open / claimed 留下，done 与无状态的老消息隐藏
     if (onlyPending && m.status !== 'open' && m.status !== 'claimed') return false
     return true
   })
+
+  // 窗口化渲染：只渲染最近 windowSize 条，更早的用「加载更早」翻。
+  // ⚠️ 长对话卡在渲染层（上万个 DOM 节点），不是解析层 —— 这是"能用久"的关键。
+  const hiddenCount = Math.max(0, filtered.length - windowSize)
+  const shown = hiddenCount > 0 ? filtered.slice(hiddenCount) : filtered
 
   let maxN = 0
   for (const m of msgs) if ((m.n || 0) > maxN) maxN = m.n || 0
@@ -277,6 +313,13 @@ function AgentChatBody(_props: any): any {
   const pendingCount = typeof data.pendingCount === 'number'
     ? data.pendingCount
     : msgs.filter(function (m) { return m.status === 'open' || m.status === 'claimed' }).length
+
+  // v0.5：需回执但超时未应答的消息编号（服务端算好的，本地不重复算）
+  const ackOverdueSet: Record<number, boolean> = {}
+  if (Array.isArray(data.ackOverdue)) {
+    for (const n of data.ackOverdue) ackOverdueSet[n] = true
+  }
+  const ackOverdueCount = typeof data.ackOverdueCount === 'number' ? data.ackOverdueCount : 0
 
   // ⚠️ 贴底跟随（这是之前重写时弄丢的一段）：
   //   只有「用户原本就在底部」时才自动滚到最新，
@@ -335,6 +378,10 @@ function AgentChatBody(_props: any): any {
       title: Object.keys(data.assignedTo || {}).map(function (k) { return k + ': ' + data.assignedTo[k] }).join('\n'),
       style: { background: '#e8912d', color: '#fff', borderRadius: '9px', padding: '1px 7px', fontSize: '11px' },
     }, pendingCount + ' 待办') : null,
+    ackOverdueCount > 0 ? h('span', {
+      title: '需回执但超过 5 分钟没回应的消息',
+      style: { background: '#c05050', color: '#fff', borderRadius: '9px', padding: '1px 7px', fontSize: '11px' },
+    }, '\u26A0 ' + ackOverdueCount + ' 超时') : null,
     h('span', { style: { flex: 1 } }),
     h('button', {
       onClick: function () { setOnlyPending(!onlyPending) },
@@ -358,6 +405,19 @@ function AgentChatBody(_props: any): any {
       style: { fontSize: '11px', border: '1px solid #d0d7de', background: '#fff', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', marginLeft: '4px' },
     }, collapsed ? '展开' : '收起'),
   )
+
+  // 「加载更早」：窗口化后，更早的消息按需追加
+  const moreBtn = (!collapsed && hiddenCount > 0) ? h('div', {
+    style: { textAlign: 'center', padding: '6px 0 10px' },
+  },
+    h('button', {
+      onClick: function () { setWindowSize(windowSize + WINDOW_SIZE) },
+      style: {
+        fontSize: '11px', border: '1px solid #d0d7de', background: '#fff',
+        borderRadius: '4px', padding: '3px 10px', cursor: 'pointer', color: '#1f3b63',
+      },
+    }, '\u2191 加载更早 ' + Math.min(hiddenCount, WINDOW_SIZE) + ' 条（还有 ' + hiddenCount + ' 条）'),
+  ) : null
 
   let listChildren: any
   if (collapsed) {
@@ -401,7 +461,31 @@ function AgentChatBody(_props: any): any {
               borderRadius: '8px', padding: '0 6px', fontSize: '10px', lineHeight: '15px',
             },
           }, STATUS_META[m.status].label) : null,
+          m.phase && PHASE_META[m.phase] ? h('span', {
+            title: '阶段：' + m.phase,
+            style: {
+              border: '1px solid ' + PHASE_META[m.phase].color, color: PHASE_META[m.phase].color,
+              borderRadius: '8px', padding: '0 5px', fontSize: '10px', lineHeight: '14px',
+            },
+          }, PHASE_META[m.phase].label) : null,
+          m.priority === 'critical' ? h('span', {
+            title: '紧急',
+            style: { background: '#c05050', color: '#fff', borderRadius: '8px', padding: '0 5px', fontSize: '10px', lineHeight: '15px' },
+          }, '紧急') : null,
+          m.ack && (m.status === 'open' || m.status === 'claimed') ? h('span', {
+            title: '需要对方回执' + (ackOverdueSet[m.n] ? '（已超时）' : ''),
+            style: {
+              background: ackOverdueSet[m.n] ? '#c05050' : '#fff0f0',
+              color: ackOverdueSet[m.n] ? '#fff' : '#c05050',
+              border: '1px solid #c05050',
+              borderRadius: '8px', padding: '0 5px', fontSize: '10px', lineHeight: '14px',
+            },
+          }, ackOverdueSet[m.n] ? '\u26A0 超时未应答' : '需回执') : null,
           m.assign ? h('span', { style: { color: '#8e5bd0' } }, '\u2192 ' + m.assign) : null,
+          m.scope ? h('span', {
+            title: m.scope,
+            style: { color: '#0aa3a3', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+          }, '\uD83D\uDCC1 ' + m.scope) : null,
           h('span', { title: m.time }, relTime(m.time, now)),
           m.replyTo != null ? h('a', {
             onClick: function () { jumpTo(Number(m.replyTo)) },
@@ -424,7 +508,7 @@ function AgentChatBody(_props: any): any {
       flex: 1, minHeight: 0, overflow: 'auto', padding: '8px 10px',
       display: collapsed ? 'none' : 'block',
     },
-  }, listChildren)
+  }, moreBtn, listChildren)
 
   return h('div', {
     style: {

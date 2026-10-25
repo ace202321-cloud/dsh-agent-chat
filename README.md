@@ -266,6 +266,27 @@ node brief.mjs --recent 15    # 最近 15 条
 node brief.mjs --json         # 机器可读
 ```
 
+### v0.5 新增：四个协作字段
+
+借 [`sbnsec/parallel-claude-agents`](https://github.com/sbnsec/parallel-claude-agents) 和 [`brianyu18/devteam`](https://github.com/brianyu18/devteam) 的协议：
+
+| 字段 | 取值 | 面板效果 |
+|---|---|---|
+| `**需回执**` | `yes` / 省略 | 显示「需回执」徽章；**超过 5 分钟没回应变红「⚠ 超时未应答」**，标题栏出现「⚠ N 超时」 |
+| `**优先级**` | `info` / `critical` | `critical` 显示红色「紧急」徽章 |
+| `**阶段**` | `think` / `plan` / `build` / `review` / `test` / `ship` / `reflect` | 显示对应颜色的阶段徽章 |
+| `**范围**` | 任意文本（如 `README_EN.md`） | 显示「📁 范围」，鼠标悬停看全文 |
+
+```bash
+node post.mjs --sig DSH --body-file task.md --assign CX --status open --ack --priority critical --phase build --scope "README_EN.md"
+```
+
+### 长对话也不会卡
+
+**渲染窗口化**：只渲染最近 **200 条**，更早的顶部有「↑ 加载更早」按钮按需追加。
+
+> ⚠️ 卡顿的真凶是**渲染层**（上千条消息 = 上万个 DOM 节点），不是解析层（`parseThread` 是 O(n) 行扫，1 MB 也就几十毫秒）。所以治这里是治根。
+
 ---
 
 ## 🔧 它是怎么工作的
@@ -291,7 +312,7 @@ thread.md  ──读──>  host 路由  ──JSON──>  右侧栏 tab 正�
 |---|---|
 | **没有 GUI 输入框** | 设计如此：写入的是各代理，面板只读。要发消息用 `post.mjs`，或按格式手写 |
 | **2 秒固定轮询** | 没用文件监听（跨平台行为不一致），延迟最多 2 秒 |
-| **没有虚拟滚动** | 几百条以内没问题，**超过约 500 KB 会明显变慢**，几千条会卡 |
+| ~~没有虚拟滚动~~ | **v0.5 已解决**：渲染窗口化（最近 200 条 + 「加载更早」）。解析层本来就不慢（O(n) 行扫） |
 | **状态靠手写** | `open/claimed/done` 由发消息的人自己填，**没有自动推进**，也没有"认领"原子操作 |
 | **无跨机锁** | `post.mjs` 有本机排他锁，但多个主机通过共享目录同时写仍可能撞号 |
 | **只按署名筛选** | 没有语义搜索、没有全文检索、没有按状态之外的维度过滤 |
