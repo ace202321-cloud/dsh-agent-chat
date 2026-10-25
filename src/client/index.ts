@@ -434,6 +434,76 @@ function AgentChatBody(_props: any): any {
   }, header, list)
 }
 
+/**
+ * 把我们的 tab 打开（或聚焦）。
+ *
+ * 用户把右侧栏 tab 关掉后，没有任何 UI 能叫它回来 —— 这是 v0.4.0 的硬伤。
+ * 官方原生入口是 `sidebarRight.openTab({ sessionId, kind, params, revealIfOpened })`
+ * （签名见 dsh-client-ui-sidebar-right 的 SidebarSurface）。
+ *
+ * 因为不同 DSH 版本暴露的服务名不完全一样，这里按顺序试几个，全部失败就把
+ * 实际可用的方法名打到控制台 —— 下次照着改，别再瞎猜。
+ */
+export function openOurTab(svc: { sidebarRight?: any; sidebarRightTabs?: any; sessionId?: string }): boolean {
+  const sr = svc.sidebarRight
+  if (sr && typeof sr.openTab === 'function') {
+    try {
+      sr.openTab({
+        ...(svc.sessionId ? { sessionId: svc.sessionId } : {}),
+        kind: TAB_KIND,
+        params: {},
+        revealIfOpened: true,
+      })
+      return true
+    } catch { /* 试下一个 */ }
+  }
+  const st = svc.sidebarRightTabs
+  if (st && typeof st.openTab === 'function') {
+    try { st.openTab({ id: TAB_ID }); return true } catch { /* 试下一个 */ }
+  }
+  try {
+    console.warn(
+      '[dsh-agent-chat] 无法自动打开「代理对话」tab。可用方法：',
+      '\n  sidebarRight:', sr ? Object.keys(sr) : '(未注入)',
+      '\n  sidebarRightTabs:', st ? Object.keys(st) : '(未注入)',
+    )
+  } catch { /* ignore */ }
+  return false
+}
+
+/** 会话头部的小按钮：用户关掉 tab 后，还能一键叫回来 */
+function makeHeaderEntry(ctx: any): any {
+  return function HeaderEntry(props: any): any {
+    const [state, setState] = React.useState<'idle' | 'ok' | 'fail'>('idle')
+    return h('button', {
+      type: 'button',
+      title: '打开 / 聚焦「代理对话」面板',
+      'data-agent-chat-entry': 'true',
+      onClick: function (e: any) {
+        try { e && e.stopPropagation && e.stopPropagation() } catch { /* ignore */ }
+        const ok = openOurTab({
+          sidebarRight: ctx.sidebarRight,
+          sidebarRightTabs: ctx.sidebarRightTabs,
+          sessionId: props && props.sessionId,
+        })
+        setState(ok ? 'ok' : 'fail')
+        setTimeout(function () { setState('idle') }, ok ? 600 : 2000)
+      },
+      style: {
+        display: 'inline-flex', alignItems: 'center', gap: '4px',
+        fontSize: '12px', padding: '2px 8px', borderRadius: '6px',
+        border: '1px solid ' + (state === 'fail' ? '#c05050' : state === 'ok' ? '#22a06b' : '#d0d7de'),
+        background: state === 'fail' ? '#fff5f5' : state === 'ok' ? '#f2fbf6' : '#fff',
+        color: state === 'fail' ? '#c05050' : '#1f3b63',
+        cursor: 'pointer', lineHeight: '18px', whiteSpace: 'nowrap',
+      },
+    },
+      h('span', { 'aria-hidden': true }, '\uD83D\uDCAC'),
+      h('span', null, state === 'fail' ? '打不开' : '代理对话'),
+    )
+  }
+}
+
 export function apply(ctx: any): void {
   // 阶段 1：声明 tab 类型
   ctx.effect(function () {
@@ -451,4 +521,15 @@ export function apply(ctx: any): void {
       return ctx.slots.register({ name: 'sidebar.right.pane.tab', key: TAB_ID }, AgentChatBody)
     })
   }, 'dsh-agent-chat: tab body')
+
+  // 阶段 3：会话头部入口 —— 关掉 tab 后还能叫回来（v0.4.1）
+  ctx.effect(function () {
+    return ctx.slots.inject('conversation.session.header.actions', function () {
+      return ctx.slots.register({
+        name: 'conversation.session.header.actions',
+        id: 'dsh-agent-chat-entry',
+        order: 60,
+      }, makeHeaderEntry(ctx))
+    })
+  }, 'dsh-agent-chat: header entry')
 }
