@@ -437,14 +437,27 @@ function AgentChatBody(_props: any): any {
 /**
  * 把我们的 tab 打开（或聚焦）。
  *
- * 用户把右侧栏 tab 关掉后，没有任何 UI 能叫它回来 —— 这是 v0.4.0 的硬伤。
- * 官方原生入口是 `sidebarRight.openTab({ sessionId, kind, params, revealIfOpened })`
- * （签名见 dsh-client-ui-sidebar-right 的 SidebarSurface）。
+ * ⚠️ 关键教训（v0.4.2）：装了 `dsh-better-sidebar` 之后，右侧栏的「+」菜单
+ * 列的是**它自己的** tab 注册表（`ctx.betterSidebar.registerTab`），而不是
+ * DSH 原生的 `sidebarRightTabs`。所以只注册原生通道的插件会从菜单里消失。
  *
- * 因为不同 DSH 版本暴露的服务名不完全一样，这里按顺序试几个，全部失败就把
- * 实际可用的方法名打到控制台 —— 下次照着改，别再瞎猜。
+ * 因此这里按「用户实际看到的那份列表」优先：
+ *   1. betterSidebar.openTab({ type })      ← 装了 better-sidebar 时的正道
+ *   2. sidebarRight.openTab({ kind, ... })  ← 原生 surface
+ *   3. sidebarRightTabs.openTab({ id })     ← 更老的原生 API
+ * 全失败就把实际可用的方法名打到控制台。
  */
-export function openOurTab(svc: { sidebarRight?: any; sidebarRightTabs?: any; sessionId?: string }): boolean {
+export function openOurTab(svc: {
+  betterSidebar?: any
+  sidebarRight?: any
+  sidebarRightTabs?: any
+  sessionId?: string
+}): boolean {
+  const bs = svc.betterSidebar
+  if (bs && typeof bs.openTab === 'function') {
+    try { bs.openTab({ type: TAB_ID, title: TAB_TITLE }); return true } catch { /* 试下一个 */ }
+    try { bs.openTab({ type: TAB_ID }); return true } catch { /* 试下一个 */ }
+  }
   const sr = svc.sidebarRight
   if (sr && typeof sr.openTab === 'function') {
     try {
@@ -464,6 +477,7 @@ export function openOurTab(svc: { sidebarRight?: any; sidebarRightTabs?: any; se
   try {
     console.warn(
       '[dsh-agent-chat] 无法自动打开「代理对话」tab。可用方法：',
+      '\n  betterSidebar:', bs ? Object.keys(bs) : '(未注入)',
       '\n  sidebarRight:', sr ? Object.keys(sr) : '(未注入)',
       '\n  sidebarRightTabs:', st ? Object.keys(st) : '(未注入)',
     )
@@ -482,6 +496,7 @@ function makeHeaderEntry(ctx: any): any {
       onClick: function (e: any) {
         try { e && e.stopPropagation && e.stopPropagation() } catch { /* ignore */ }
         const ok = openOurTab({
+          betterSidebar: ctx.betterSidebar,
           sidebarRight: ctx.sidebarRight,
           sidebarRightTabs: ctx.sidebarRightTabs,
           sessionId: props && props.sessionId,
@@ -505,7 +520,7 @@ function makeHeaderEntry(ctx: any): any {
 }
 
 export function apply(ctx: any): void {
-  // 阶段 1：声明 tab 类型
+  // 阶段 1：DSH 原生 tab 类型（没装 dsh-better-sidebar 时的通道）
   ctx.effect(function () {
     return ctx.sidebarRightTabs.register({
       id: TAB_ID,
@@ -515,14 +530,34 @@ export function apply(ctx: any): void {
     })
   }, 'dsh-agent-chat: tab type')
 
-  // 阶段 2：注册正文
+  // 阶段 2：原生 tab 正文
   ctx.effect(function () {
     return ctx.slots.inject('sidebar.right.pane.tab', function () {
       return ctx.slots.register({ name: 'sidebar.right.pane.tab', key: TAB_ID }, AgentChatBody)
     })
   }, 'dsh-agent-chat: tab body')
 
-  // 阶段 3：会话头部入口 —— 关掉 tab 后还能叫回来（v0.4.1）
+  // 阶段 3：注册进 dsh-better-sidebar 的注册表（装了它的时候，用户看到的
+  // 「+」菜单列的是这一份；只注册原生通道会从菜单里消失 —— v0.4.1 的坑）
+  ctx.effect(function () {
+    try {
+      if (ctx.betterSidebar && typeof ctx.betterSidebar.registerTab === 'function') {
+        return ctx.betterSidebar.registerTab({
+          id: TAB_ID,
+          title: TAB_TITLE,
+          description: '多代理对话流（只读渲染 thread.md）',
+          order: 120,
+          single: true,                       // 同类型只开一个，重点时聚焦
+          component: AgentChatBody,
+        })
+      }
+    } catch (e) {
+      try { console.warn('[dsh-agent-chat] betterSidebar.registerTab 失败:', e) } catch { /* ignore */ }
+    }
+    return undefined
+  }, 'dsh-agent-chat: better-sidebar tab')
+
+  // 阶段 4：会话头部入口 —— 关掉 tab 后还能叫回来
   ctx.effect(function () {
     return ctx.slots.inject('conversation.session.header.actions', function () {
       return ctx.slots.register({
