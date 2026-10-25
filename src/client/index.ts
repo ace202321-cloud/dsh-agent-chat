@@ -33,6 +33,10 @@ interface Msg {
   time: string
   model?: string
   replyTo?: number | null
+  /** 指派给谁（空 = 未指派 / 老消息） */
+  assign?: string
+  /** open / claimed / done（空 = 老消息，不参与待办） */
+  status?: string
   text: string
 }
 
@@ -46,7 +50,18 @@ interface Payload {
   size?: number
   count?: number
   signatures?: string[]
+  /** 未完成条数（open + claimed） */
+  pendingCount?: number
+  /** 按指派对象分组计数 */
+  assignedTo?: Record<string, number>
   messages?: Msg[]
+}
+
+/** 状态呈现：颜色 + 中文标签 */
+const STATUS_META: Record<string, { color: string; label: string }> = {
+  open: { color: '#c05050', label: '待接' },
+  claimed: { color: '#e8912d', label: '进行中' },
+  done: { color: '#22a06b', label: '已完成' },
 }
 
 const h = React.createElement
@@ -171,6 +186,7 @@ function AgentChatBody(_props: any): any {
   const [data, setData] = React.useState<any>({ ok: true, messages: [], signatures: [] })
   const [collapsed, setCollapsed] = React.useState(false)
   const [filterSig, setFilterSig] = React.useState('')
+  const [onlyPending, setOnlyPending] = React.useState(false)
   const [now, setNow] = React.useState(Date.now())
   const [seenUpTo, setSeenUpTo] = React.useState(-1)
   const listRef = React.useRef<any>(null)
@@ -218,7 +234,12 @@ function AgentChatBody(_props: any): any {
 
   const msgs: Msg[] = Array.isArray(data.messages) ? data.messages : []
   const sigs: string[] = Array.isArray(data.signatures) ? data.signatures : []
-  const shown = filterSig ? msgs.filter(function (m) { return m.sig === filterSig }) : msgs
+  const shown = msgs.filter(function (m) {
+    if (filterSig && m.sig !== filterSig) return false
+    // 只看未完成：open / claimed 留下，done 与无状态的老消息隐藏
+    if (onlyPending && m.status !== 'open' && m.status !== 'claimed') return false
+    return true
+  })
 
   let maxN = 0
   for (const m of msgs) if ((m.n || 0) > maxN) maxN = m.n || 0
@@ -251,6 +272,11 @@ function AgentChatBody(_props: any): any {
 
   let unread = 0
   for (const m of msgs) if ((m.n || 0) > seenUpTo) unread++
+
+  // 待办：open + claimed。优先用服务端算好的数，连不上时按本地消息兜底
+  const pendingCount = typeof data.pendingCount === 'number'
+    ? data.pendingCount
+    : msgs.filter(function (m) { return m.status === 'open' || m.status === 'claimed' }).length
 
   // ⚠️ 贴底跟随（这是之前重写时弄丢的一段）：
   //   只有「用户原本就在底部」时才自动滚到最新，
@@ -305,7 +331,20 @@ function AgentChatBody(_props: any): any {
     unread > 0 ? h('span', {
       style: { background: '#c05050', color: '#fff', borderRadius: '9px', padding: '1px 7px', fontSize: '11px' },
     }, unread + ' 新') : null,
+    pendingCount > 0 ? h('span', {
+      title: Object.keys(data.assignedTo || {}).map(function (k) { return k + ': ' + data.assignedTo[k] }).join('\n'),
+      style: { background: '#e8912d', color: '#fff', borderRadius: '9px', padding: '1px 7px', fontSize: '11px' },
+    }, pendingCount + ' 待办') : null,
     h('span', { style: { flex: 1 } }),
+    h('button', {
+      onClick: function () { setOnlyPending(!onlyPending) },
+      title: '只显示 open / claimed 的消息',
+      style: {
+        fontSize: '11px', border: '1px solid ' + (onlyPending ? '#e8912d' : '#d0d7de'),
+        background: onlyPending ? '#fff7ec' : '#fff', color: onlyPending ? '#b8781a' : '#555',
+        borderRadius: '4px', padding: '2px 6px', cursor: 'pointer',
+      },
+    }, onlyPending ? '只看未完成 ✓' : '只看未完成'),
     h('select', {
       value: filterSig,
       onChange: function (e: any) { setFilterSig(e.target.value) },
@@ -341,7 +380,8 @@ function AgentChatBody(_props: any): any {
         id: 'agent-chat-msg-' + m.n,
         style: {
           borderLeft: '3px solid ' + c,
-          background: isNew ? '#fffdf3' : '#fff',
+          background: isNew ? '#fffdf3' : (m.status === 'done' ? '#fbfbfb' : '#fff'),
+          opacity: m.status === 'done' ? 0.82 : 1,
           borderRadius: '4px', margin: '6px 0', padding: '6px 8px',
           boxShadow: '0 1px 2px rgba(0,0,0,.05)',
         },
@@ -355,6 +395,13 @@ function AgentChatBody(_props: any): any {
             },
           }, String(m.sig || '?').slice(0, 2)),
           h('span', { style: { fontWeight: 700, color: '#333' } }, '#' + m.n + ' ' + m.sig),
+          m.status && STATUS_META[m.status] ? h('span', {
+            style: {
+              background: STATUS_META[m.status].color, color: '#fff',
+              borderRadius: '8px', padding: '0 6px', fontSize: '10px', lineHeight: '15px',
+            },
+          }, STATUS_META[m.status].label) : null,
+          m.assign ? h('span', { style: { color: '#8e5bd0' } }, '\u2192 ' + m.assign) : null,
           h('span', { title: m.time }, relTime(m.time, now)),
           m.replyTo != null ? h('a', {
             onClick: function () { jumpTo(Number(m.replyTo)) },
