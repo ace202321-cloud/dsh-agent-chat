@@ -27,6 +27,98 @@ export const TAB_TITLE = '代理对话'
 
 const PALETTE = ['#4e8cff', '#e8912d', '#22a06b', '#c05050', '#8e5bd0', '#0aa3a3', '#b8781a', '#5a6b7b']
 
+// ------------------------------------------------------------------ 主题跟随
+// DSH 的主题由宿主决定（暗色/亮色），插件没有直接的 theme 服务可用。
+// 这里用「实际渲染出来的 body 背景亮度」判断，再补一个 matchMedia 兜底；
+// 主题切换时轮询 + MutationObserver 一起盯着，保证面板跟着变。
+const AC_VARS_LIGHT: Record<string, string> = {
+  '--ac-bg': '#fafbfc',
+  '--ac-panel': '#ffffff',
+  '--ac-border': '#e1e4e8',
+  '--ac-border2': '#d0d7de',
+  '--ac-text': '#222222',
+  '--ac-muted': '#555555',
+  '--ac-heading': '#1f3b63',
+  '--ac-code': '#f0f2f4',
+  '--ac-pre': '#f6f8fa',
+  '--ac-th': '#f3f5f7',
+  '--ac-done': '#fbfbfb',
+  '--ac-new': '#fffdf3',
+  '--ac-pending': '#fff7ec',
+  '--ac-errbg': '#fff0f0',
+  '--ac-failbg': '#fff5f5',
+  '--ac-okbg': '#f2fbf6',
+  '--ac-warn': '#b8781a',
+  '--ac-badge-text': '#ffffff',
+}
+const AC_VARS_DARK: Record<string, string> = {
+  '--ac-bg': '#1e1f22',
+  '--ac-panel': '#26282c',
+  '--ac-border': '#3a3d42',
+  '--ac-border2': '#4a4d53',
+  '--ac-text': '#e8e8e8',
+  '--ac-muted': '#a8adb4',
+  '--ac-heading': '#9db8e8',
+  '--ac-code': '#2f3237',
+  '--ac-pre': '#24262a',
+  '--ac-th': '#2b2e33',
+  '--ac-done': '#232529',
+  '--ac-new': '#2f2b1e',
+  '--ac-pending': '#332a1a',
+  '--ac-errbg': '#3a2528',
+  '--ac-failbg': '#3d2628',
+  '--ac-okbg': '#1f2f26',
+  '--ac-warn': '#e0a94a',
+  '--ac-badge-text': '#ffffff',
+}
+
+function readDarkTheme(): boolean {
+  try {
+    const el = document.body || document.documentElement
+    const bg = getComputedStyle(el).backgroundColor || ''
+    const m = bg.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/)
+    if (m) {
+      const r = Number(m[1]); const g = Number(m[2]); const b = Number(m[3])
+      if (r + g + b > 0) return (0.299 * r + 0.587 * g + 0.114 * b) < 128
+    }
+  } catch { /* ignore */ }
+  try { return window.matchMedia('(prefers-color-scheme: dark)').matches } catch { /* ignore */ }
+  return false
+}
+
+function useDarkTheme(): boolean {
+  const [dark, setDark] = React.useState<boolean>(readDarkTheme)
+  React.useEffect(function () {
+    let last = dark
+    const update = function (): void {
+      const next = readDarkTheme()
+      if (next !== last) { last = next; setDark(next) }
+    }
+    const timer = setInterval(update, 1500)
+    let mq: MediaQueryList | null = null
+    try {
+      mq = window.matchMedia('(prefers-color-scheme: dark)')
+      mq.addEventListener('change', update)
+    } catch { /* ignore */ }
+    let obs: MutationObserver | null = null
+    try {
+      obs = new MutationObserver(update)
+      obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] })
+      if (document.body) obs.observe(document.body, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] })
+    } catch { /* ignore */ }
+    return function () {
+      clearInterval(timer)
+      try { if (mq) mq.removeEventListener('change', update) } catch { /* ignore */ }
+      try { if (obs) obs.disconnect() } catch { /* ignore */ }
+    }
+  }, [])
+  return dark
+}
+
+function themeVars(dark: boolean): Record<string, string> {
+  return dark ? AC_VARS_DARK : AC_VARS_LIGHT
+}
+
 interface Msg {
   n: number
   sig: string
@@ -153,7 +245,7 @@ function md(text: string): string {
       i++
       while (i < lines.length && !/^\s*```/.test(lines[i])) { buf.push(lines[i]); i++ }
       i++
-      out.push('<pre style="background:#f6f8fa;border:1px solid #e1e4e8;border-radius:6px;padding:8px;overflow:auto;font-size:12px;margin:6px 0"><code>' + esc(buf.join('\n')) + '</code></pre>')
+      out.push('<pre style="background:var(--ac-pre,#f6f8fa);border:1px solid var(--ac-border,#e1e4e8);border-radius:6px;padding:8px;overflow:auto;font-size:12px;margin:6px 0"><code>' + esc(buf.join('\n')) + '</code></pre>')
       continue
     }
     // ~~~ 围栏（GFM 也支持），里面的内容不能被当成标题/表格
@@ -162,7 +254,7 @@ function md(text: string): string {
       i++
       while (i < lines.length && !/^\s*~~~/.test(lines[i])) { buf.push(lines[i]); i++ }
       i++
-      out.push('<pre style="background:#f6f8fa;border:1px solid #e1e4e8;border-radius:6px;padding:8px;overflow:auto;font-size:12px;margin:6px 0"><code>' + esc(buf.join('\n')) + '</code></pre>')
+      out.push('<pre style="background:var(--ac-pre,#f6f8fa);border:1px solid var(--ac-border,#e1e4e8);border-radius:6px;padding:8px;overflow:auto;font-size:12px;margin:6px 0"><code>' + esc(buf.join('\n')) + '</code></pre>')
       continue
     }
     if (/^\s*\|.*\|\s*$/.test(line)) {
@@ -175,20 +267,20 @@ function md(text: string): string {
         const rest = body.slice(1)
         out.push(
           '<table style="border-collapse:collapse;width:100%;font-size:12px;margin:6px 0"><thead><tr>' +
-          head.map(function (c) { return '<th style="border:1px solid #d0d7de;background:#f3f5f7;padding:4px 6px;text-align:left">' + inline(c) + '</th>' }).join('') +
+          head.map(function (c) { return '<th style="border:1px solid var(--ac-border2,#d0d7de);background:var(--ac-th,#f3f5f7);padding:4px 6px;text-align:left">' + inline(c) + '</th>' }).join('') +
           '</tr></thead><tbody>' +
-          rest.map(function (r) { return '<tr>' + r.map(function (c) { return '<td style="border:1px solid #d0d7de;padding:4px 6px">' + inline(c) + '</td>' }).join('') + '</tr>' }).join('') +
+          rest.map(function (r) { return '<tr>' + r.map(function (c) { return '<td style="border:1px solid var(--ac-border2,#d0d7de);padding:4px 6px">' + inline(c) + '</td>' }).join('') + '</tr>' }).join('') +
           '</tbody></table>'
         )
       }
       continue
     }
-    if (/^\s*-{3,}\s*$/.test(line)) { out.push('<hr style="border:none;border-top:1px solid #e1e4e8;margin:8px 0">'); i++; continue }
+    if (/^\s*-{3,}\s*$/.test(line)) { out.push('<hr style="border:none;border-top:1px solid var(--ac-border,#e1e4e8);margin:8px 0">'); i++; continue }
     const hh = /^(#{1,6})\s+(.*)$/.exec(line)
     if (hh) {
       const lv = hh[1].length
       const sizes = [18, 16, 15, 14, 13, 12]
-      out.push('<div style="font-weight:700;font-size:' + (sizes[lv - 1] || 12) + 'px;margin:10px 0 4px;color:#1f3b63">' + inline(hh[2]) + '</div>')
+      out.push('<div style="font-weight:700;font-size:' + (sizes[lv - 1] || 12) + 'px;margin:10px 0 4px;color:var(--ac-heading,#1f3b63)">' + inline(hh[2]) + '</div>')
       i++
       continue
     }
@@ -213,6 +305,7 @@ function md(text: string): string {
 
 /** 右侧栏 tab 正文 */
 function AgentChatBody(_props: any): any {
+  const dark = useDarkTheme()
   const [data, setData] = React.useState<any>({ ok: true, messages: [], signatures: [] })
   const [collapsed, setCollapsed] = React.useState(false)
   const [filterSig, setFilterSig] = React.useState('')
@@ -367,42 +460,42 @@ function AgentChatBody(_props: any): any {
   const header = h('div', {
     style: {
       display: 'flex', alignItems: 'center', gap: '4px', padding: '8px 10px',
-      borderBottom: '1px solid #e1e4e8', background: '#fff', flex: 'none', flexWrap: 'wrap',
+      borderBottom: '1px solid var(--ac-border, #e1e4e8)', background: 'var(--ac-panel, #fff)', flex: 'none', flexWrap: 'wrap',
     },
   },
-    h('span', { style: { fontWeight: 700, fontSize: '13px', color: '#1f3b63' } }, '代理对话'),
+    h('span', { style: { fontWeight: 700, fontSize: '13px', color: 'var(--ac-heading, #1f3b63)' } }, '代理对话'),
     unread > 0 ? h('span', {
-      style: { background: '#c05050', color: '#fff', borderRadius: '9px', padding: '1px 7px', fontSize: '11px' },
+      style: { background: '#c05050', color: 'var(--ac-badge-text, #fff)', borderRadius: '9px', padding: '1px 7px', fontSize: '11px' },
     }, unread + ' 新') : null,
     pendingCount > 0 ? h('span', {
       title: Object.keys(data.assignedTo || {}).map(function (k) { return k + ': ' + data.assignedTo[k] }).join('\n'),
-      style: { background: '#e8912d', color: '#fff', borderRadius: '9px', padding: '1px 7px', fontSize: '11px' },
+      style: { background: '#e8912d', color: 'var(--ac-badge-text, #fff)', borderRadius: '9px', padding: '1px 7px', fontSize: '11px' },
     }, pendingCount + ' 待办') : null,
     ackOverdueCount > 0 ? h('span', {
       title: '需回执但超过 5 分钟没回应的消息',
-      style: { background: '#c05050', color: '#fff', borderRadius: '9px', padding: '1px 7px', fontSize: '11px' },
+      style: { background: '#c05050', color: 'var(--ac-badge-text, #fff)', borderRadius: '9px', padding: '1px 7px', fontSize: '11px' },
     }, '\u26A0 ' + ackOverdueCount + ' 超时') : null,
     h('span', { style: { flex: 1 } }),
     h('button', {
       onClick: function () { setOnlyPending(!onlyPending) },
       title: '只显示 open / claimed 的消息',
       style: {
-        fontSize: '11px', border: '1px solid ' + (onlyPending ? '#e8912d' : '#d0d7de'),
-        background: onlyPending ? '#fff7ec' : '#fff', color: onlyPending ? '#b8781a' : '#555',
+        fontSize: '11px', border: '1px solid ' + (onlyPending ? '#e8912d' : 'var(--ac-border2, #d0d7de)'),
+        background: onlyPending ? 'var(--ac-pending, #fff7ec)' : 'var(--ac-panel, #fff)', color: onlyPending ? 'var(--ac-warn, #b8781a)' : 'var(--ac-muted, #555)',
         borderRadius: '4px', padding: '2px 6px', cursor: 'pointer',
       },
     }, onlyPending ? '只看未完成 ✓' : '只看未完成'),
     h('select', {
       value: filterSig,
       onChange: function (e: any) { setFilterSig(e.target.value) },
-      style: { fontSize: '11px', border: '1px solid #d0d7de', borderRadius: '4px', padding: '2px 4px' },
+      style: { fontSize: '11px', border: '1px solid var(--ac-border2, #d0d7de)', borderRadius: '4px', padding: '2px 4px' },
     },
       h('option', { value: '' }, '全部'),
       sigs.map(function (s) { return h('option', { key: s, value: s }, s) }),
     ),
     h('button', {
       onClick: function () { setCollapsed(!collapsed) },
-      style: { fontSize: '11px', border: '1px solid #d0d7de', background: '#fff', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', marginLeft: '4px' },
+      style: { fontSize: '11px', border: '1px solid var(--ac-border2, #d0d7de)', background: 'var(--ac-panel, #fff)', borderRadius: '4px', padding: '2px 8px', cursor: 'pointer', marginLeft: '4px' },
     }, collapsed ? '展开' : '收起'),
   )
 
@@ -413,8 +506,8 @@ function AgentChatBody(_props: any): any {
     h('button', {
       onClick: function () { setWindowSize(windowSize + WINDOW_SIZE) },
       style: {
-        fontSize: '11px', border: '1px solid #d0d7de', background: '#fff',
-        borderRadius: '4px', padding: '3px 10px', cursor: 'pointer', color: '#1f3b63',
+        fontSize: '11px', border: '1px solid var(--ac-border2, #d0d7de)', background: 'var(--ac-panel, #fff)',
+        borderRadius: '4px', padding: '3px 10px', cursor: 'pointer', color: 'var(--ac-heading, #1f3b63)',
       },
     }, '\u2191 加载更早 ' + Math.min(hiddenCount, WINDOW_SIZE) + ' 条（还有 ' + hiddenCount + ' 条）'),
   ) : null
@@ -440,7 +533,7 @@ function AgentChatBody(_props: any): any {
         id: 'agent-chat-msg-' + m.n,
         style: {
           borderLeft: '3px solid ' + c,
-          background: isNew ? '#fffdf3' : (m.status === 'done' ? '#fbfbfb' : '#fff'),
+          background: isNew ? 'var(--ac-new, #fffdf3)' : (m.status === 'done' ? 'var(--ac-done, #fbfbfb)' : 'var(--ac-panel, #fff)'),
           opacity: m.status === 'done' ? 0.82 : 1,
           borderRadius: '4px', margin: '6px 0', padding: '6px 8px',
           boxShadow: '0 1px 2px rgba(0,0,0,.05)',
@@ -451,13 +544,13 @@ function AgentChatBody(_props: any): any {
             style: {
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               width: '18px', height: '18px', borderRadius: '50%',
-              background: c, color: '#fff', fontSize: '10px', fontWeight: 700,
+              background: c, color: 'var(--ac-badge-text, #fff)', fontSize: '10px', fontWeight: 700,
             },
           }, String(m.sig || '?').slice(0, 2)),
           h('span', { style: { fontWeight: 700, color: '#333' } }, '#' + m.n + ' ' + m.sig),
           m.status && STATUS_META[m.status] ? h('span', {
             style: {
-              background: STATUS_META[m.status].color, color: '#fff',
+              background: STATUS_META[m.status].color, color: 'var(--ac-badge-text, #fff)',
               borderRadius: '8px', padding: '0 6px', fontSize: '10px', lineHeight: '15px',
             },
           }, STATUS_META[m.status].label) : null,
@@ -470,12 +563,12 @@ function AgentChatBody(_props: any): any {
           }, PHASE_META[m.phase].label) : null,
           m.priority === 'critical' ? h('span', {
             title: '紧急',
-            style: { background: '#c05050', color: '#fff', borderRadius: '8px', padding: '0 5px', fontSize: '10px', lineHeight: '15px' },
+            style: { background: '#c05050', color: 'var(--ac-badge-text, #fff)', borderRadius: '8px', padding: '0 5px', fontSize: '10px', lineHeight: '15px' },
           }, '紧急') : null,
           m.ack && (m.status === 'open' || m.status === 'claimed') ? h('span', {
             title: '需要对方回执' + (ackOverdueSet[m.n] ? '（已超时）' : ''),
             style: {
-              background: ackOverdueSet[m.n] ? '#c05050' : '#fff0f0',
+              background: ackOverdueSet[m.n] ? '#c05050' : 'var(--ac-errbg, #fff0f0)',
               color: ackOverdueSet[m.n] ? '#fff' : '#c05050',
               border: '1px solid #c05050',
               borderRadius: '8px', padding: '0 5px', fontSize: '10px', lineHeight: '14px',
@@ -494,7 +587,7 @@ function AgentChatBody(_props: any): any {
           m.model ? h('span', { style: { color: '#aaa' } }, '(' + String(m.model).slice(0, 28) + ')') : null,
         ),
         h('div', {
-          style: { fontSize: '12.5px', lineHeight: 1.65, color: '#222' },
+          style: { fontSize: '12.5px', lineHeight: 1.65, color: 'var(--ac-text, #222)' },
           dangerouslySetInnerHTML: { __html: md(m.text || '') },
         }),
       )
@@ -511,10 +604,13 @@ function AgentChatBody(_props: any): any {
   }, moreBtn, listChildren)
 
   return h('div', {
-    style: {
+    className: 'dsh-agent-chat-root',
+    'data-dark': dark ? '1' : '0',
+    style: Object.assign({
       display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0,
-      fontFamily: 'system-ui,-apple-system,"Segoe UI",sans-serif', background: '#fafbfc',
-    },
+      fontFamily: 'system-ui,-apple-system,"Segoe UI",sans-serif',
+      background: 'var(--ac-bg, #fafbfc)', color: 'var(--ac-text, #222)',
+    }, themeVars(dark)),
   }, header, list)
 }
 
@@ -572,6 +668,7 @@ export function openOurTab(svc: {
 /** 会话头部的小按钮：用户关掉 tab 后，还能一键叫回来 */
 function makeHeaderEntry(ctx: any, getBs: () => any): any {
   return function HeaderEntry(props: any): any {
+    const dark = useDarkTheme()
     const [state, setState] = React.useState<'idle' | 'ok' | 'fail'>('idle')
     return h('button', {
       type: 'button',
@@ -588,14 +685,14 @@ function makeHeaderEntry(ctx: any, getBs: () => any): any {
         setState(ok ? 'ok' : 'fail')
         setTimeout(function () { setState('idle') }, ok ? 600 : 2000)
       },
-      style: {
+      style: Object.assign({
         display: 'inline-flex', alignItems: 'center', gap: '4px',
         fontSize: '12px', padding: '2px 8px', borderRadius: '6px',
-        border: '1px solid ' + (state === 'fail' ? '#c05050' : state === 'ok' ? '#22a06b' : '#d0d7de'),
-        background: state === 'fail' ? '#fff5f5' : state === 'ok' ? '#f2fbf6' : '#fff',
-        color: state === 'fail' ? '#c05050' : '#1f3b63',
+        border: '1px solid ' + (state === 'fail' ? '#c05050' : state === 'ok' ? '#22a06b' : 'var(--ac-border2, #d0d7de)'),
+        background: state === 'fail' ? 'var(--ac-failbg, #fff5f5)' : state === 'ok' ? 'var(--ac-okbg, #f2fbf6)' : 'var(--ac-panel, #fff)',
+        color: state === 'fail' ? '#c05050' : 'var(--ac-heading, #1f3b63)',
         cursor: 'pointer', lineHeight: '18px', whiteSpace: 'nowrap',
-      },
+      }, themeVars(dark)),
     },
       h('span', { 'aria-hidden': true }, '\uD83D\uDCAC'),
       h('span', null, state === 'fail' ? '打不开' : '代理对话'),
@@ -655,14 +752,7 @@ export function apply(ctx: any): void {
     try { console.warn('[dsh-agent-chat] 无法注入 betterSidebar（可能没装 dsh-better-sidebar）:', e) } catch { /* ignore */ }
   }
 
-  // 阶段 4：会话头部入口 —— 关掉 tab 后还能叫回来
-  ctx.effect(function () {
-    return ctx.slots.inject('conversation.session.header.actions', function () {
-      return ctx.slots.register({
-        name: 'conversation.session.header.actions',
-        id: 'dsh-agent-chat-entry',
-        order: 60,
-      }, makeHeaderEntry(ctx, function () { return betterSidebarService }))
-    })
-  }, 'dsh-agent-chat: header entry')
+  // 阶段 4（已移除 2026-10-27）：会话头部「💬 代理对话」入口。
+  // 功能已完全由右侧栏 tab 承载；头部按钮走 openTab 静默失败，点了没反应，用户要求删掉。
+  // 如需恢复：把 makeHeaderEntry 注册回 'conversation.session.header.actions' 槽位即可。
 }

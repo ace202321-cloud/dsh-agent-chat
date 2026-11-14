@@ -14,4 +14,4 @@
 # line up one-to-one. Change one, change both.
 - insert:
     - id: dsh-agent-chat
-      name: 'dsh-agent-chat'
+      name: '@dsh-external/dsh-agent-chat'
