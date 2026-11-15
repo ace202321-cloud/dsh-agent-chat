@@ -641,9 +641,10 @@ export function openOurTab(svc: {
   const sr = svc.sidebarRight
   if (sr && typeof sr.openTab === 'function') {
     try {
-      sr.openTab({
+      // ⚠️ 原生签名是 openTab(kind: string, options?)，不是 openTab({ kind })。
+      // 2026-11-15 实测：传对象进去不会抛错，但也不会打开任何东西（点了没反应）。
+      sr.openTab(TAB_KIND, {
         ...(svc.sessionId ? { sessionId: svc.sessionId } : {}),
-        kind: TAB_KIND,
         params: {},
         revealIfOpened: true,
       })
@@ -676,10 +677,15 @@ function makeHeaderEntry(ctx: any, getBs: () => any): any {
       'data-agent-chat-entry': 'true',
       onClick: function (e: any) {
         try { e && e.stopPropagation && e.stopPropagation() } catch { /* ignore */ }
+        // sidebarRight 没写进 client.inject，直接读 ctx.sidebarRight 会被 cordis 拒；
+        // 用 ctx.get 安全取（web-all 的浏览器 tab 就是这么拿的）。
+        const safeGet = function (name: string): any {
+          try { return typeof ctx.get === 'function' ? ctx.get(name) : undefined } catch { return undefined }
+        }
         const ok = openOurTab({
           betterSidebar: getBs(),
-          sidebarRight: ctx.sidebarRight,
-          sidebarRightTabs: ctx.sidebarRightTabs,
+          sidebarRight: safeGet('sidebarRight'),
+          sidebarRightTabs: safeGet('sidebarRightTabs'),
           sessionId: props && props.sessionId,
         })
         setState(ok ? 'ok' : 'fail')
@@ -695,7 +701,7 @@ function makeHeaderEntry(ctx: any, getBs: () => any): any {
       }, themeVars(dark)),
     },
       h('span', { 'aria-hidden': true }, '\uD83D\uDCAC'),
-      h('span', null, state === 'fail' ? '打不开' : '代理对话'),
+      h('span', null, state === 'fail' ? '打不开' : state === 'ok' ? '已打开' : '代理对话'),
     )
   }
 }
