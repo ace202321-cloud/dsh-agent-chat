@@ -725,34 +725,22 @@ export function apply(ctx: any): void {
     })
   }, 'dsh-agent-chat: tab body')
 
-  // 阶段 3：注册进 dsh-better-sidebar 的注册表
-  // 装了它的时候，用户看到的「+」菜单列的是这一份注册表，不是原生 sidebarRightTabs。
-  // 必须走 ctx.inject —— 直接读 ctx.betterSidebar 会被 cordis 拒（v0.4.2 的坑）。
-  try {
-    ctx.inject(['betterSidebar'], function (scoped: any) {
-      try {
-        const bs = scoped.betterSidebar
-        if (!bs || typeof bs.registerTab !== 'function') return
-        betterSidebarService = bs
-        scoped.effect(function () {
-          return bs.registerTab({
-            id: TAB_ID,
-            title: TAB_TITLE,
-            description: '多代理对话流（只读渲染 thread.md）',
-            order: 120,
-            single: true,                     // 同类型只开一个，重复点只聚焦
-            component: AgentChatBody,
-          })
-        }, 'dsh-agent-chat: better-sidebar tab')
-      } catch (e) {
-        try { console.warn('[dsh-agent-chat] betterSidebar 注册失败:', e) } catch { /* ignore */ }
-      }
+  // 阶段 3（2026-11-15 移除）：曾把 tab 注册进 dsh-better-sidebar 的注册表。
+  // 那个插件已卸载；而 ctx.inject(['betterSidebar']) 在服务不存在时会抛，
+  // 连带把整个 client 模块（含右侧栏 tab）一起打死，所以整段删掉。
+  // 现在只走原生 sidebarRightTabs + 头部常驻按钮。
+  // 阶段 4：会话头部常驻入口「💬 代理对话」。
+  // 2026-11-15 恢复：右侧栏 tab 会因各种原因（tab 被关、注册表丢失、
+  // better-sidebar 卸载）从菜单里消失，头部按钮是唯一稳定的入口。
+  // 走官方槽位 'conversation.session.header.actions'，和 cost-meter 同一套注册方式。
+  ctx.effect(function () {
+    return ctx.slots.inject('conversation.session.header.actions', function () {
+      return ctx.slots.register({
+        name: 'conversation.session.header.actions',
+        id: TAB_ID,
+        order: 12,
+        inject: function () { return {} },
+      }, makeHeaderEntry(ctx, function () { return betterSidebarService }))
     })
-  } catch (e) {
-    try { console.warn('[dsh-agent-chat] 无法注入 betterSidebar（可能没装 dsh-better-sidebar）:', e) } catch { /* ignore */ }
-  }
-
-  // 阶段 4（已移除 2026-10-27）：会话头部「💬 代理对话」入口。
-  // 功能已完全由右侧栏 tab 承载；头部按钮走 openTab 静默失败，点了没反应，用户要求删掉。
-  // 如需恢复：把 makeHeaderEntry 注册回 'conversation.session.header.actions' 槽位即可。
+  }, 'dsh-agent-chat: header entry')
 }
